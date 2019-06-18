@@ -6,13 +6,11 @@ import sys
 import string
 import matplotlib.pyplot as plt
 import cv2
-
-import seaborn as sns 
-sns.set() 
+from magic import MagicCoeffCmb, SpectralTransforms
 
 ################ Load data ###################
 def load_data(num_files=2, standard=True):
-    os.chdir('/home/ryadav/Meduri_reversals/dipole_files')
+    os.chdir('/home/rakesh/Meduri_reversals/dipole_files')
 
     atoz = string.ascii_lowercase
     tags = ['BM+Ra5e5'+letter+str(integer) for integer in [5, 6, 7] for letter in atoz]
@@ -129,59 +127,84 @@ def get_EqCros(df_main, pad_size=1500, std_thres=0.2):
 
 
 ############## frame generator ##################
-def write_frames(lookup_table, global_ind=1000, num_frames=100):
+def write_frames(lookup_table, global_ind=1000, num_frames=100, zip_events=True):
     
+    zip_file_paths=[]
     status = []
-    fig = plt.figure(figsize=(4, 4))
-    ax = plt.Axes(fig, [0., 0., 1., 1.])
-    fig.add_axes(ax)
-
-    os.chdir('/home/ryadav/Meduri_reversals/')
-    all_global_inds = [global_ind-i for i in range(num_frames)] #decreases by index
-    unique_tags = lookup_table.loc[all_global_inds]['BM+Ra5e5+tag'].unique()
-    if len(unique_tags)==1: # skip event spanning multiple files, not many
-        tag = lookup_table.loc[global_ind]['BM+Ra5e5+tag']
-        time = lookup_table[lookup_table['BM+Ra5e5+tag']==tag]['time']
-        local_step_ind = lookup_table.loc[global_ind]['ind_in_file']
-        # get local indices in the corresponding dipole file
-        ks = [local_step_ind-i for i in range(num_frames)] #decreases by index
-        
-        # Br cmb section
-        cmb = MagicCoeffCmb(tag='BM+Ra5e5'+tag, iplot=False)
-        interp_blm = np.zeros((len(time), cmb.blm.shape[1]), dtype=np.complex64)
-        #print(interp_blm.shape)
-        for k in range(cmb.blm.shape[1]):
-            interp_blm[:,k] = np.interp(time, cmb.time, cmb.blm[:,k])
-
-        nlat = int(max(int(cmb.l_max_cmb*(3./2./2.)*2.),192))
-        nphi = int(2*nlat/cmb.minc)
-
-        # Define spectral transform setup
-        sh = SpectralTransforms(l_max=cmb.l_max_cmb, minc=cmb.minc,
-                                lm_max=cmb.lm_max_cmb,
-                                n_theta_max=nlat)
-        # plot figure
-        fname_ind = 0
-        for k in ks:
-            #print(k)
-            BrCMB = sh.spec_spat(interp_blm[k, :]*cmb.ell*(sh.ell+1)/cmb.rcmb**2)
-            ax.imshow(BrCMB.T, cmap='gray', aspect='auto', 
-                      vmin=-2*np.std(BrCMB), 
-                      vmax= 2*np.std(BrCMB)
-                      )
-            ax.set_axis_off()
-            fname = 'BrCMB_Res1/brcmb_{:010}.png'.format(global_ind-fname_ind)
-            fig.savefig(fname, dpi=50)
-            fname_ind+=1
+    os.chdir('/home/rakesh/Meduri_reversals/')
+    
+    if os.path.isfile('BrCMB_images/event_{:010}.zip'.format(global_ind)):
+        print('File present. Skipping event.')
     else:
-        status=[global_ind]
+        all_global_inds = [global_ind-i for i in range(num_frames)] #decreases by index
+        unique_tags = lookup_table.loc[all_global_inds]['BM+Ra5e5+tag'].unique()
+        if len(unique_tags)==1: # skip event spanning multiple files, not many
+            tag = lookup_table.loc[global_ind]['BM+Ra5e5+tag']
+            time = lookup_table[lookup_table['BM+Ra5e5+tag']==tag]['time']
+            local_step_ind = lookup_table.loc[global_ind]['ind_in_file']
+            # get local indices in the corresponding dipole file
+            ks = [local_step_ind-i for i in range(num_frames)] #decreases by index
+            
+            # Br cmb section
+            cmb = MagicCoeffCmb(tag='BM+Ra5e5'+tag, iplot=False)
+            interp_blm = np.zeros((len(time), cmb.blm.shape[1]), dtype=np.complex64)
+            #print(interp_blm.shape)
+            for k in range(cmb.blm.shape[1]):
+                interp_blm[:,k] = np.interp(time, cmb.time, cmb.blm[:,k])
+           
+            nlat = int(max(int(cmb.l_max_cmb*(3./2./2.)*2.),192))
+            nphi = int(2*nlat/cmb.minc)
+           
+            # Define spectral transform setup
+            sh = SpectralTransforms(l_max=cmb.l_max_cmb, minc=cmb.minc,
+                                    lm_max=cmb.lm_max_cmb,
+                                    n_theta_max=nlat)
+            
+            os.chdir('BrCMB_images')
+            print('*****************Working on event', global_ind, '*****************')
+            fname_ind = 0
+            # plot figure
+            for k in ks:
+                BrCMB = sh.spec_spat(interp_blm[k, :]*cmb.ell*(sh.ell+1)/cmb.rcmb**2)
+                fig = plt.figure(figsize=(4, 4))
+                ax = plt.Axes(fig, [0., 0., 1., 1.])
+                fig.add_axes(ax)
+                ax.imshow(BrCMB.T, cmap='gray', aspect='auto', 
+                          vmin=-2*np.std(BrCMB), 
+                          vmax= 2*np.std(BrCMB)
+                          )
+                ax.set_axis_off()
+                fname = 'brcmb_{:010}.png'.format(global_ind-fname_ind)
+                fig.savefig(fname, dpi=50)
+                fname_ind+=1
+                plt.close(fig) # avoid memory buildup from matplotlib
+                # For zipping files later
+                zip_file_paths.append(fname)
+            
+            if zip_events==True:
+                # zip file to reduce the numbe of files, 
+                # otherwsie directory contains 10s of thousands of files
+                from zipfile import ZipFile
+                # writing files to a zipfile 
+                with ZipFile('event_{:010}.zip'.format(global_ind),'w') as zip: 
+                    # writing each file one by one 
+                    for file in zip_file_paths: 
+                        zip.write(file)  
+                print('Images zipped for the event.')
+                # remove the images that were zipped
+                for file in zip_file_paths:
+                    os.remove(file)
+                print('Removed images after zipping.')
+                
+        else:
+            status=[global_ind]
         
     return status
 
 
 
 # dipole file data dir
-os.chdir('/home/ryadav/Meduri_reversals/dipole_files')
+os.chdir('/home/rakesh/Meduri_reversals/dipole_files')
 
 df_main = load_data(num_files=-1)
 
@@ -195,7 +218,7 @@ lookup_table = pd.read_csv('lookup_table.csv')
 # padding size (in no. of points) of the analysis window around the equator crossings
 pad_size = 1000
 std_thres = 0.3 # North hemi has about 0 to 1 normalized latitude range
-create_frames=False
+create_frames=True
 
 # get where reversal/excursions happened
 df_EquCross_forward = get_EqCros(df_main, pad_size=pad_size, std_thres=std_thres)
@@ -209,7 +232,7 @@ if create_frames==True:
     counter=1
     skipped_global_inds = []
     for i in df_EquCross_forward.index:
-        status=write_frames(lookup_table, global_ind=i, num_frames=200)
+        status=write_frames(lookup_table, global_ind=i, num_frames=1000, zip_events=True)
         if len(status)!=0:
             print('Skipping event spanning multiple files.')
             skipped_global_inds.append(status[0])
